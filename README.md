@@ -37,7 +37,7 @@ python main.py node1 6000
 
 Start a second node and join the network via the first node:
 ```sh
-python main.py node2 6001 127.0.0.1 6000
+python main.py node2 6001 <node1_ip> 6000
 ```
 
 ### Commands
@@ -54,7 +54,7 @@ Once a node is running, you can interact with it using the following commands:
 
 1. **Send a message to a specific node**:
     ```sh
-    SEND 127.0.0.1 6001 Hello, Node 2! This is Node 1.
+    SEND <target_ip> 6001 Hello! This is Node 1.
     ```
 
 2. **Broadcast a message to all neighbors**:
