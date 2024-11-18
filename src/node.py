@@ -13,6 +13,7 @@ class P2PNode:
         :param port: 节点监听的端口
         """
         self.node_id = node_id
+        self.ip = self.get_local_ip()
         self.port = port
         self.neighbors = []  # [(IP, Port)]
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -24,7 +25,13 @@ class P2PNode:
             "STATUS": self.handle_status,
             "DISCOVER": self.handle_discover,
             "NEW_NODE": self.handle_new_node,
+            "UPDATE_NEIGHBORS": self.handle_update_neighbors,
         }
+
+    def get_local_ip(self):
+        """获取本机的局域网 IP 地址"""
+        hostname = socket.gethostname()
+        return socket.gethostbyname(hostname)
 
     def start(self, bootstrap_ip=None, bootstrap_port=None):
         """
@@ -32,10 +39,10 @@ class P2PNode:
         :param bootstrap_ip: 引导节点的 IP 地址
         :param bootstrap_port: 引导节点的端口
         """
-        self.server_socket.bind(('0.0.0.0', self.port))
+        self.server_socket.bind((self.ip, self.port))
         self.server_socket.listen(5)
         self.running = True
-        print(f"Node {self.node_id} started on port {self.port}.")
+        print(f"Node {self.node_id} started on {self.ip}:{self.port}.")
         threading.Thread(target=self.listen_for_connections, daemon=True).start()
 
         # 如果有引导节点，尝试加入网络
@@ -71,12 +78,14 @@ class P2PNode:
         self.send_data(bootstrap_ip, bootstrap_port, {
             "command": "NEW_NODE",
             "node_id": self.node_id,
-            "ip": "127.0.0.1",
+            "ip": self.ip,
             "port": self.port,
         })
 
     def handle_new_node(self, message):
-        """处理 NEW_NODE 命令，更新邻居并传播信息"""
+        """
+        处理 NEW_NODE 命令：更新邻居列表并触发全网更新
+        """
         node_id = message.get("node_id")
         ip = message.get("ip")
         port = message.get("port")
@@ -86,10 +95,34 @@ class P2PNode:
             print(f"Node {self.node_id} detected new node: {node_id} at {ip}:{port}")
             self.neighbors.append(new_neighbor)
 
-            # 继续将新节点信息广播给现有邻居
-            for neighbor_ip, neighbor_port in self.neighbors:
-                if (neighbor_ip, neighbor_port) != new_neighbor:  # 避免回传给新节点
-                    self.send_data(neighbor_ip, neighbor_port, message)
+        # 向所有邻居广播最新的全网邻居信息
+        self.broadcast_update_neighbors()
+
+    def broadcast_update_neighbors(self, exclude_self=False):
+        """
+        广播全网最新邻居信息
+        :param exclude_self: 是否从列表中移除当前节点
+        """
+        updated_neighbors = self.neighbors + [(self.ip, self.port)]
+        if not exclude_self:
+            updated_neighbors.append((self.ip, self.port))
+
+        update_message = {
+            "command": "UPDATE_NEIGHBORS",
+            "neighbors": updated_neighbors
+        }
+        for neighbor_ip, neighbor_port in self.neighbors:
+            self.send_data(neighbor_ip, neighbor_port, update_message)
+
+    def handle_update_neighbors(self, message):
+        """
+        处理 UPDATE_NEIGHBORS 命令：覆盖邻居列表
+        """
+        updated_neighbors = [tuple(neighbor) for neighbor in message.get("neighbors", [])]
+        self_ip_port = (self.ip, self.port)
+        # 去重并排除自己
+        self.neighbors = list(set(updated_neighbors) - {self_ip_port})
+        print(f"Node {self.node_id} updated neighbors: {self.neighbors}")
 
     def send_data(self, target_ip, target_port, data):
         """向目标节点发送数据"""
@@ -113,6 +146,8 @@ class P2PNode:
     def broadcast(self, content):
         """封装 BROADCAST 命令并广播"""
         encrypted_content = encrypt_data(content)
+        # 打印广播钱的neighbors:
+        print(f"Node {self.node_id} broadcasting to neighbors: {self.neighbors}")
         for neighbor_ip, neighbor_port in self.neighbors:
             self.send_data(neighbor_ip, neighbor_port, {
                 "command": "BROADCAST",
@@ -134,14 +169,16 @@ class P2PNode:
         content = decrypt_data(encrypted_content)
         print(f"Node {self.node_id} received broadcast from {source}: {content}")
 
-        # 转发广播消息给其他邻居
-        for neighbor_ip, neighbor_port in self.neighbors:
-            if source != self.node_id:
-                self.send_data(neighbor_ip, neighbor_port, message)
+        # 实现有问题，暂时注释掉
+        # # 转发广播消息给其他邻居
+        # for neighbor_ip, neighbor_port in self.neighbors:
+        #     # 不可包含source节点
+        #     if (neighbor_ip, neighbor_port) != (self.ip, self.port):
+        #         self.send_data(neighbor_ip, neighbor_port, message)
 
     def handle_status(self, message):
         """处理 STATUS 命令"""
-        print(f"Node {self.node_id} reporting status: Running on port {self.port}, neighbors: {self.neighbors}")
+        print(f"Node {self.node_id} reporting status: Running on {self.ip}:{self.port}, neighbors: {self.neighbors}")
 
     def handle_discover(self, message):
         """处理 DISCOVER 命令"""
@@ -155,6 +192,13 @@ class P2PNode:
         return messages
 
     def stop(self):
-        """停止节点"""
+        """
+        停止节点并通知邻居更新拓扑
+        """
+        print(f"Node {self.node_id} stopping...")
+        # 广播退出消息，让邻居更新拓扑
+        self.broadcast_update_neighbors(exclude_self=True)
+
         self.running = False
         self.server_socket.close()
+        print(f"Node {self.node_id} stopped.")

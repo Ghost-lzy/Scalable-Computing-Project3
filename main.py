@@ -18,9 +18,6 @@ def main():
     print("Type 'exit' to stop the node.")
     try:
         while True:
-            # 处理收到的消息
-            for message in node.get_received_messages():
-                print(f"Received: {message}")
 
             # 处理用户输入命令
             if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
