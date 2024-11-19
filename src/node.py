@@ -103,7 +103,7 @@ class P2PNode:
         Broadcast the latest neighbor information to the network
         :param exclude_self: Whether to remove the current node from the list
         """
-        updated_neighbors = self.neighbors + [(self.ip, self.port)]
+        updated_neighbors = self.neighbors
         if not exclude_self:
             updated_neighbors.append((self.ip, self.port))
 
